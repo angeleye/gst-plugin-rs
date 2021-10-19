@@ -137,11 +137,17 @@ impl PaintableImpl for SinkPaintable {
 }
 
 impl SinkPaintable {
-    pub(super) fn handle_frame_changed(&self, obj: &super::SinkPaintable, frame: Option<Frame>) {
+    pub(super) fn handle_frame_changed(
+        &self,
+        obj: &super::SinkPaintable,
+        context: &gdk::GLContext,
+        frame: Option<Frame>,
+    ) {
         if let Some(frame) = frame {
             gst_trace!(CAT, obj: obj, "Received new frame");
 
-            let new_paintables = frame.into_textures(&mut *self.cached_textures.borrow_mut());
+            let new_paintables =
+                frame.into_textures(context, &mut *self.cached_textures.borrow_mut());
             let new_size = new_paintables
                 .first()
                 .map(|p| (f32::round(p.width) as u32, f32::round(p.height) as u32))

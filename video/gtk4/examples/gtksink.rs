@@ -7,23 +7,24 @@ use std::cell::RefCell;
 
 fn create_ui(app: &gtk::Application) {
     let pipeline = gst::Pipeline::new(None);
-    let src = gst::ElementFactory::make("videotestsrc", None).unwrap();
+    let src = gst::ElementFactory::make("gltestsrc", None).unwrap();
 
     let overlay = gst::ElementFactory::make("clockoverlay", None).unwrap();
     overlay.set_property("font-desc", "Monospace 42");
 
-    let sink = gst::ElementFactory::make("gtk4paintablesink", None).unwrap();
-    let paintable = sink.property::<gdk::Paintable>("paintable");
+    // TODO: future plans to provide a bin-like element that works with less setup
+    let sink = gst::ElementFactory::make("glsinkbin", None).unwrap();
+    let gtksink = gst::ElementFactory::make("gtk4paintablesink", None).unwrap();
+    sink.set_property("sink", &gtksink);
 
     pipeline.add_many(&[&src, &overlay, &sink]).unwrap();
-    src.link_filtered(
-        &overlay,
-        &gst::Caps::builder("video/x-raw")
-            .field("width", 640)
-            .field("height", 480)
-            .build(),
-    )
-    .unwrap();
+    let caps = gst::Caps::builder("video/x-raw")
+        .features(&[&gst_gl::CAPS_FEATURE_MEMORY_GL_MEMORY])
+        .field("format", &gst_video::VideoFormat::Rgba.to_str())
+        .field("texture-target", &"2D")
+        .build();
+
+    src.link_filtered(&overlay, &caps).unwrap();
     overlay.link(&sink).unwrap();
 
     let window = gtk::ApplicationWindow::new(app);
@@ -33,6 +34,13 @@ fn create_ui(app: &gtk::Application) {
     let picture = gtk::Picture::new();
     let label = gtk::Label::new(Some("Position: 00:00:00"));
 
+    // This and the property on the sink need to be documented
+    let native = window.native().unwrap();
+    window.realize();
+    let surface = native.surface().unwrap();
+    gtksink.set_property("surface", Some(surface).to_value());
+
+    let paintable = gtksink.property::<gdk::Paintable>("paintable");
     picture.set_paintable(Some(&paintable));
     vbox.append(&picture);
     vbox.append(&label);
