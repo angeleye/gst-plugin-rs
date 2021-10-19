@@ -9,7 +9,7 @@
 //
 // SPDX-License-Identifier: MPL-2.0
 
-use gtk::prelude::*;
+use gst_gl::prelude::*;
 use gtk::{gdk, glib};
 use std::collections::{HashMap, HashSet};
 
@@ -89,15 +89,50 @@ fn video_frame_to_memory_texture(
     (texture, pixel_aspect_ratio)
 }
 
+fn video_frame_to_gl_texture(
+    frame: gst_video::VideoFrame<gst_video::video_frame::Readable>,
+    cached_textures: &mut HashMap<usize, gdk::Texture>,
+    used_textures: &mut HashSet<usize>,
+    context: &gdk::GLContext,
+) -> (gdk::Texture, f64) {
+    let texture_id = frame.texture_id(0).unwrap() as usize;
+    assert_ne!(texture_id, 0);
+
+    let pixel_aspect_ratio =
+        (frame.info().par().numer() as f64) / (frame.info().par().denom() as f64);
+
+    if let Some(texture) = cached_textures.get(&(texture_id)) {
+        used_textures.insert(texture_id);
+        return (texture.clone(), pixel_aspect_ratio);
+    }
+
+    let width = frame.width();
+    let height = frame.height();
+
+    let texture = unsafe {
+        gdk::GLTexture::new(context, texture_id as u32, width as i32, height as i32)
+            .upcast::<gdk::Texture>()
+    };
+
+    cached_textures.insert(texture_id, texture.clone());
+    used_textures.insert(texture_id);
+
+    (texture, pixel_aspect_ratio)
+}
+
 impl Frame {
-    pub fn into_textures(self, cached_textures: &mut HashMap<usize, gdk::Texture>) -> Vec<Texture> {
+    pub fn into_textures(
+        self,
+        context: &gdk::GLContext,
+        cached_textures: &mut HashMap<usize, gdk::Texture>,
+    ) -> Vec<Texture> {
         let mut textures = Vec::with_capacity(1 + self.overlays.len());
         let mut used_textures = HashSet::with_capacity(1 + self.overlays.len());
 
         let width = self.frame.width();
         let height = self.frame.height();
         let (texture, pixel_aspect_ratio) =
-            video_frame_to_memory_texture(self.frame, cached_textures, &mut used_textures);
+            video_frame_to_gl_texture(self.frame, cached_textures, &mut used_textures, context);
 
         textures.push(Texture {
             texture,
@@ -131,7 +166,7 @@ impl Frame {
 
 impl Frame {
     pub fn new(buffer: &gst::Buffer, info: &gst_video::VideoInfo) -> Result<Self, gst::FlowError> {
-        let frame = gst_video::VideoFrame::from_buffer_readable(buffer.clone(), info)
+        let frame = gst_video::VideoFrame::from_buffer_readable_gl(buffer.clone(), info)
             .map_err(|_| gst::FlowError::Error)?;
 
         let overlays = frame
